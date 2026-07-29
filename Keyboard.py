@@ -3,11 +3,6 @@ from dotenv import load_dotenv
 from telebot.types import ReplyKeyboardMarkup
 import os
 
-load_dotenv()
-
-telegram_token = os.environ['TELEGRAM_TOKEN']
-bot = telebot.TeleBot(telegram_token)
-
 
 def get_main_menu():
     main_menu = ReplyKeyboardMarkup(resize_keyboard=True)

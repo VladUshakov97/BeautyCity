@@ -1,6 +1,6 @@
 import telebot
 import psycopg2
-from database_func import connect_to_database
+from database import connect_to_database
 
 
 def write_to_database(column, values):

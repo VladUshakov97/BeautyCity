@@ -5,7 +5,7 @@ from telebot.types import Message
 import os
 from dotenv import load_dotenv
 from states import BookingStates
-from keyboards import *
+from keyboard import *
 from database import execute_query, fetch_one
 import re
 import datetime
@@ -37,9 +37,9 @@ def handle_main_menu(message):
         user_data[chat_id] = {}
 
     elif choice == 'Записаться к мастеру':
-        # пока просто заглушка - надо сделать
-        bot.send_message(chat_id, "Эта функция в разработке. Пожалуйста, используйте 'Записаться в салон'.")
-        bot.set_state(chat_id, None, chat_id)
+
+        bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_all_masters())
+        bot.set_state(chat_id, BookingStates.choose_master, chat_id)
 
     elif choice == 'Записаться на процедуру':
         # пока просто заглушка - надо сделать
@@ -70,118 +70,9 @@ def process_salon(message):
     try:
         salon_id = int(text.split()[0])
     except:
-        bot.send_message(chat_id, "Пожалуйста, выберите салон из предложенных кнопок.")
+        bot.send_message(chat_id, "Пожалуйста, выберите салон из предложенных кнопок.", reply_markup=main_menu())
         return
 
-    row = fetch_one("SELECT id FROM salons WHERE id = %s", (salon_id,))
-    if not row:
-        bot.send_message(chat_id, "Такого салона нет. Выберите из списка.")
-        return
-
-    user_data[chat_id]['salon_id'] = salon_id
-    bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-    bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
-
-# выбора услуги
-@bot.message_handler(state=BookingStates.choose_service)
-def process_service(message):
-    chat_id = message.chat.id
-    text = message.text
-
-    if text == 'Отмена':
-        bot.send_message(chat_id, "Запись отменена.", reply_markup=main_menu())
-        bot.set_state(chat_id, None, chat_id)
-        del user_data[chat_id]
-        return
-    if text == 'Назад':
-        bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
-        bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
-        return
-
-    try:
-        service_id = int(text.split()[0])
-    except:
-        bot.send_message(chat_id, "Выберите услугу из списка.")
-        return
-
-    row = fetch_one("SELECT id, price FROM services WHERE id = %s", (service_id,))
-    if not row:
-        bot.send_message(chat_id, "Такой услуги нет.")
-        return
-
-    user_data[chat_id]['service_id'] = service_id
-    user_data[chat_id]['price'] = row[1]
-
-    bot.set_state(chat_id, BookingStates.choose_master, chat_id)
-    salon_id = user_data[chat_id]['salon_id']
-    masters_kb = get_masters_kb(service_id, salon_id)
-    if masters_kb.keyboard:
-        bot.send_message(chat_id, "Выберите мастера:", reply_markup=masters_kb)
-    else:
-        bot.send_message(chat_id, "К сожалению, в этом салоне нет мастеров для данной услуги. Попробуйте выбрать другой салон или услугу.")
-        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-        bot.send_message(chat_id, "Выберите другую услугу:", reply_markup=get_services_kb())
-
-# выбора мастера
-@bot.message_handler(state=BookingStates.choose_master)
-def process_master(message):
-    chat_id = message.chat.id
-    text = message.text
-
-    if text == 'Отмена':
-        bot.send_message(chat_id, "Запись отменена.", reply_markup=main_menu())
-        bot.set_state(chat_id, None, chat_id)
-        del user_data[chat_id]
-        return
-    if text == 'Назад':
-        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-        bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
-        return
-
-    try:
-        master_id = int(text.split()[0])
-    except:
-        bot.send_message(chat_id, "Выберите мастера из списка.")
-        return
-
-    service_id = user_data[chat_id]['service_id']
-    row = fetch_one(
-        "SELECT 1 FROM master_services WHERE master_id = %s AND service_id = %s",
-        (master_id, service_id)
-    )
-    if not row:
-        bot.send_message(chat_id, "Этот мастер не оказывает выбранную услугу. Выберите другого.")
-        return
-
-    user_data[chat_id]['master_id'] = master_id
-    bot.set_state(chat_id, BookingStates.choose_time, chat_id)
-    bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД (например, 2026-08-01):")
-    bot.send_message(chat_id, "Пока доступны только даты с сегодня по +7 дней.")
-
-# выбора даты и времени
-@bot.message_handler(state=BookingStates.choose_time)
-def process_time(message):
-    # ждём дату, потом показываем слоты.
-    chat_id = message.chat.id
-    text = message.text
-
-    if text == 'Отмена':
-        bot.send_message(chat_id, "Запись отменена.", reply_markup=main_menu())
-        bot.set_state(chat_id, None, chat_id)
-        if chat_id in user_data:
-            del user_data[chat_id]
-        return
-
-    if text == 'Назад':
-        if 'master_id' in user_data.get(chat_id, {}):
-            bot.set_state(chat_id, BookingStates.choose_master, chat_id)
-            salon_id = user_data[chat_id]['salon_id']
-            service_id = user_data[chat_id]['service_id']
-            bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_masters_kb(service_id, salon_id))
-        else:
-            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
-        return
 
     if not user_data.get(chat_id, {}).get('date_chosen'):
         try:
@@ -303,3 +194,26 @@ def process_confirm(message):
         return
 
     bot.send_message(chat_id, "Пожалуйста, используйте кнопки подтверждения.")
+
+
+@bot.message_handler(func=lambda message: message == 'Оставить отзыв')
+def write_feedback(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, 'Напишите ваш отзыв: ')
+    bot.register_next_step_handler(message, save_feedback)
+
+
+def save_feedback(message):
+    chat_id = message.chat.id
+    query = 'INSERT INTO FEEDBACK(user_id, text) VALUES (%s, %s)'
+    values = (chat_id, message.text)
+    execute_query(query, values)
+
+
+@bot.message_handler(state=BookingStates.choose_master)
+def choose_master(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, 'Выберите процедуру из предложеных', reply_markup=get_services_kb())
+    bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+    
+    

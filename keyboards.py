@@ -18,11 +18,61 @@ def get_salons_kb():
     return kb
 
 
+def get_all_services_kb():
+    rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for sid, name, price in rows:
+        kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    kb.row('Назад', 'Отмена')
+    return kb
+
+
 def get_services_kb(salon_id=None):
     rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    kb.row('Назад', 'Отмена')
+    return kb
+
+
+def get_services_by_master_kb(master_id):
+    query = """
+        SELECT s.id, s.name, s.price 
+        FROM services s
+        JOIN master_services ms ON s.id = ms.service_id
+        WHERE ms.master_id = %s
+        ORDER BY s.id
+    """
+    rows = fetch_all(query, (master_id,))
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for sid, name, price in rows:
+        kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    kb.row('Назад', 'Отмена')
+    return kb
+
+
+def get_all_masters_kb():
+    rows = fetch_all("SELECT id, full_name FROM masters ORDER BY id")
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for mid, name in rows:
+        kb.add(KeyboardButton(f"{mid} {name}"))
+    kb.row('Назад', 'Отмена')
+    return kb
+
+
+def get_masters_by_service_kb(service_id):
+    query = """
+        SELECT m.id, m.full_name 
+        FROM masters m
+        JOIN master_services ms ON m.id = ms.master_id
+        WHERE ms.service_id = %s
+        ORDER BY m.id
+    """
+    rows = fetch_all(query, (service_id,))
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for mid, name in rows:
+        kb.add(KeyboardButton(f"{mid} {name}"))
     kb.row('Назад', 'Отмена')
     return kb
 
@@ -77,19 +127,3 @@ def get_back_cancel_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row('Назад', 'Отмена')
     return kb
-
-
-def write_feedback(feedback):
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row('Оставить отзыв')
-    return kb
-
-
-def get_all_masters():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    masters = fetch_all("SELECT full_name, id FROM masters")
-
-    for full_name, id in masters:
-        kb.add(KeyboardButton(full_name))
-
-    kb.row('Назад', 'Отмена')

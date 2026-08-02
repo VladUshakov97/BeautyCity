@@ -34,14 +34,19 @@ def handle_main_menu(message):
         bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
         bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
         user_data[chat_id] = {}
+        user_data[chat_id]['scenario'] = 'salon_first'
 
     elif choice == 'Записаться к мастеру':
-        bot.send_message(chat_id, "Эта функция в разработке. Пожалуйста, используйте 'Записаться в салон'.")
-        bot.set_state(chat_id, None, chat_id)
+        bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+        bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_all_masters_kb())
+        user_data[chat_id] = {}
+        user_data[chat_id]['scenario'] = 'master_first'
 
     elif choice == 'Записаться на процедуру':
-        bot.send_message(chat_id, "Эта функция в разработке.")
-        bot.set_state(chat_id, None, chat_id)
+        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+        bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_all_services_kb())
+        user_data[chat_id] = {}
+        user_data[chat_id]['scenario'] = 'service_first'
 
     elif choice == 'Записаться по телефону':
         row = fetch_one("SELECT phone FROM salons LIMIT 1")
@@ -92,8 +97,16 @@ def process_service(message):
         return
 
     if text == 'Назад':
-        bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
-        bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
+        scenario = user_data.get(chat_id, {}).get('scenario')
+        if scenario == 'salon_first':
+            bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
+            bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
+        elif scenario == 'service_first':
+            bot.set_state(chat_id, None, chat_id)
+            bot.send_message(chat_id, "Выберите действие:", reply_markup=main_menu())
+        else:
+            bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+            bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_all_masters_kb())
         return
 
     try:
@@ -110,15 +123,26 @@ def process_service(message):
     user_data[chat_id]['service_id'] = service_id
     user_data[chat_id]['price'] = row[1]
 
-    bot.set_state(chat_id, BookingStates.choose_master, chat_id)
-    salon_id = user_data[chat_id]['salon_id']
-    masters_kb = get_masters_kb(service_id, salon_id)
-    if masters_kb.keyboard:
-        bot.send_message(chat_id, "Выберите мастера:", reply_markup=masters_kb)
-    else:
-        bot.send_message(chat_id, "К сожалению, в этом салоне нет мастеров для данной услуги. Попробуйте выбрать другой салон или услугу.")
-        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-        bot.send_message(chat_id, "Выберите другую услугу:", reply_markup=get_services_kb())
+    scenario = user_data.get(chat_id, {}).get('scenario')
+    if scenario == 'service_first':
+        bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+        bot.send_message(chat_id, "Выберите мастера, который оказывает эту услугу:", reply_markup=get_masters_by_service_kb(service_id))
+        return
+    elif scenario == 'master_first':
+        bot.set_state(chat_id, BookingStates.choose_time, chat_id)
+        bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД (например, 2026-08-01):")
+        bot.send_message(chat_id, "Пока доступны только даты с сегодня по +7 дней.")
+        return
+    else: 
+        salon_id = user_data[chat_id]['salon_id']
+        masters_kb = get_masters_kb(service_id, salon_id)
+        if masters_kb.keyboard:
+            bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+            bot.send_message(chat_id, "Выберите мастера:", reply_markup=masters_kb)
+        else:
+            bot.send_message(chat_id, "К сожалению, в этом салоне нет мастеров для данной услуги. Попробуйте выбрать другой салон или услугу.")
+            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+            bot.send_message(chat_id, "Выберите другую услугу:", reply_markup=get_services_kb())
 
 # выбор мастера
 @bot.message_handler(state=BookingStates.choose_master)
@@ -133,8 +157,16 @@ def process_master(message):
         return
 
     if text == 'Назад':
-        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-        bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
+        scenario = user_data.get(chat_id, {}).get('scenario')
+        if scenario == 'master_first':
+            bot.set_state(chat_id, None, chat_id)
+            bot.send_message(chat_id, "Выберите действие:", reply_markup=main_menu())
+        elif scenario == 'service_first':
+            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_all_services_kb())
+        else:  # salon_first
+            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
         return
 
     try:
@@ -143,16 +175,36 @@ def process_master(message):
         bot.send_message(chat_id, "Выберите мастера из списка.")
         return
 
-    service_id = user_data[chat_id]['service_id']
-    row = fetch_one(
-        "SELECT 1 FROM master_services WHERE master_id = %s AND service_id = %s",
-        (master_id, service_id)
-    )
-    if not row:
-        bot.send_message(chat_id, "Этот мастер не оказывает выбранную услугу. Выберите другого.")
+    master_info = fetch_one("SELECT salon_id FROM masters WHERE id = %s", (master_id,))
+    if not master_info:
+        bot.send_message(chat_id, "Такого мастера нет.")
         return
 
+    salon_id = master_info[0]
     user_data[chat_id]['master_id'] = master_id
+    user_data[chat_id]['salon_id'] = salon_id
+
+    scenario = user_data.get(chat_id, {}).get('scenario')
+    if scenario == 'master_first':
+        bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+        bot.send_message(chat_id, "Выберите услугу, которую оказывает мастер:", reply_markup=get_services_by_master_kb(master_id))
+        return
+
+    service_id = user_data[chat_id].get('service_id')
+    if not service_id:
+        bot.send_message(chat_id, "Сначала выберите услугу.", reply_markup=main_menu())
+        bot.set_state(chat_id, None, chat_id)
+        return
+
+    row = fetch_one("SELECT 1 FROM master_services WHERE master_id = %s AND service_id = %s", (master_id, service_id))
+    if not row:
+        bot.send_message(chat_id, "Этот мастер не оказывает выбранную услугу. Выберите другого.")
+        if scenario == 'service_first':
+            bot.send_message(chat_id, "Выберите другого мастера:", reply_markup=get_masters_by_service_kb(service_id))
+        else:
+            bot.send_message(chat_id, "Выберите другого мастера:", reply_markup=get_masters_kb(service_id, salon_id))
+        return
+
     bot.set_state(chat_id, BookingStates.choose_time, chat_id)
     bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД (например, 2026-08-01):")
     bot.send_message(chat_id, "Пока доступны только даты с сегодня по +7 дней.")
@@ -171,14 +223,20 @@ def process_time(message):
         return
 
     if text == 'Назад':
-        if 'master_id' in user_data.get(chat_id, {}):
+        scenario = user_data.get(chat_id, {}).get('scenario')
+        if scenario == 'salon_first':
             bot.set_state(chat_id, BookingStates.choose_master, chat_id)
-            salon_id = user_data[chat_id]['salon_id']
             service_id = user_data[chat_id]['service_id']
+            salon_id = user_data[chat_id]['salon_id']
             bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_masters_kb(service_id, salon_id))
-        else:
+        elif scenario == 'master_first':
             bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
+            master_id = user_data[chat_id]['master_id']
+            bot.send_message(chat_id, "Выберите услугу мастера:", reply_markup=get_services_by_master_kb(master_id))
+        elif scenario == 'service_first':
+            bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+            service_id = user_data[chat_id]['service_id']
+            bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_masters_by_service_kb(service_id))
         return
 
     if not user_data.get(chat_id, {}).get('date_chosen'):
@@ -248,6 +306,29 @@ def process_phone(message):
 
     user_data[chat_id]['phone'] = text
 
+    required_keys = ['salon_id', 'service_id', 'master_id', 'date', 'time']
+    missing_keys = [key for key in required_keys if key not in user_data[chat_id]]
+    if missing_keys:
+        if 'service_id' in missing_keys and 'master_id' in user_data[chat_id]:
+            bot.send_message(
+                chat_id,
+                "Вы не выбрали услугу. Сейчас мы это исправим.",
+                reply_markup=main_menu()
+            )
+            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+            master_id = user_data[chat_id]['master_id']
+            bot.send_message(chat_id, "Выберите услугу, которую оказывает мастер:", reply_markup=get_services_by_master_kb(master_id))
+        else:
+            bot.send_message(
+                chat_id,
+                "Похоже, процесс записи был прерван. Начните заново, пожалуйста.",
+                reply_markup=main_menu()
+            )
+            bot.set_state(chat_id, None, chat_id)
+            if chat_id in user_data:
+                del user_data[chat_id]
+        return
+
     client = fetch_one("SELECT id FROM clients WHERE id = %s", (chat_id,))
     if client:
         client_id = client[0]
@@ -262,11 +343,21 @@ def process_phone(message):
     user_data[chat_id]['client_id'] = client_id
     bot.set_state(chat_id, BookingStates.confirm, chat_id)
 
+    try:
+        salon = fetch_one('SELECT address FROM salons WHERE id=%s', (user_data[chat_id]['salon_id'],))[0]
+        service = fetch_one('SELECT name FROM services WHERE id=%s', (user_data[chat_id]['service_id'],))[0]
+        master = fetch_one('SELECT full_name FROM masters WHERE id=%s', (user_data[chat_id]['master_id'],))[0]
+    except Exception as e:
+        bot.send_message(chat_id, "Ошибка при получении данных. Попробуйте ещё раз.", reply_markup=main_menu())
+        bot.set_state(chat_id, None, chat_id)
+        del user_data[chat_id]
+        return
+
     summary = (
         f"Проверьте данные:\n"
-        f"Салон: {fetch_one('SELECT address FROM salons WHERE id=%s', (user_data[chat_id]['salon_id'],))[0]}\n"
-        f"Услуга: {fetch_one('SELECT name FROM services WHERE id=%s', (user_data[chat_id]['service_id'],))[0]}\n"
-        f"Мастер: {fetch_one('SELECT full_name FROM masters WHERE id=%s', (user_data[chat_id]['master_id'],))[0]}\n"
+        f"Салон: {salon}\n"
+        f"Услуга: {service}\n"
+        f"Мастер: {master}\n"
         f"Дата: {user_data[chat_id]['date']}\n"
         f"Время: {user_data[chat_id]['time']}\n"
         f"Телефон: {text}"
@@ -279,6 +370,14 @@ def process_confirm(message):
     chat_id = message.chat.id
     text = message.text
 
+    required_keys = ['client_id', 'master_id', 'service_id', 'date', 'time']
+    if chat_id not in user_data or any(key not in user_data[chat_id] for key in required_keys):
+        bot.send_message(chat_id, "Ошибка: данные утеряны. Начните запись заново.", reply_markup=main_menu())
+        bot.set_state(chat_id, None, chat_id)
+        if chat_id in user_data:
+            del user_data[chat_id]
+        return
+
     if text == 'Отмена':
         bot.send_message(chat_id, "Запись отменена.", reply_markup=main_menu())
         bot.set_state(chat_id, None, chat_id)
@@ -287,13 +386,24 @@ def process_confirm(message):
         return
 
     if text == 'Изменить данные':
+        scenario = user_data[chat_id].get('scenario', 'salon_first')
         if chat_id in user_data:
             del user_data[chat_id]
         user_data[chat_id] = {}
+        user_data[chat_id]['scenario'] = scenario
 
-        bot.send_message(chat_id, "Начните заново выбор салона.")
-        bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
-        bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
+        if scenario == 'salon_first':
+            bot.send_message(chat_id, "Начните заново выбор салона.")
+            bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
+            bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
+        elif scenario == 'master_first':
+            bot.send_message(chat_id, "Начните заново выбор мастера.")
+            bot.set_state(chat_id, BookingStates.choose_master, chat_id)
+            bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_all_masters_kb())
+        elif scenario == 'service_first':
+            bot.send_message(chat_id, "Начните заново выбор услуги.")
+            bot.set_state(chat_id, BookingStates.choose_service, chat_id)
+            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_all_services_kb())
         return
 
     if text == 'Подтвердить запись':

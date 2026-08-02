@@ -45,7 +45,7 @@ def get_masters_kb(service_id, salon_id):
 
 def get_time_slots_kb(master_id, date_str):
     occupied = fetch_all(
-        "SELECT appointments_time FROM appointments WHERE master_id = %s AND appointments_date = %s AND status != 'cancelled'",
+        "SELECT to_char(appointments_time, 'HH24:MI') FROM appointments WHERE master_id = %s AND appointments_date = %s AND status != 'cancelled'",
         (master_id, date_str)
     )
     occupied_times = [row[0] for row in occupied]
@@ -55,7 +55,7 @@ def get_time_slots_kb(master_id, date_str):
 
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     row = []
-    for i, slot in enumerate(free_slots):
+    for slot in free_slots:
         row.append(KeyboardButton(slot))
         if len(row) == 3:
             kb.row(*row)

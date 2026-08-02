@@ -13,6 +13,7 @@ def main_menu():
 def get_salons_kb():
     rows = fetch_all("SELECT id, address FROM salons ORDER BY id")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for sid, addr in rows:
         kb.add(KeyboardButton(f"{sid} {addr}"))
     kb.row('Отмена')
@@ -20,11 +21,12 @@ def get_salons_kb():
 
 
 def get_all_services_kb(with_promo=False):
-    """Все услуги для сценария 'Записаться на процедуру'. with_promo=True добавляет кнопку промокода."""
     rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+
     if with_promo:
         kb.row('У меня есть промокод')
     kb.row('Назад', 'Отмена')
@@ -32,7 +34,6 @@ def get_all_services_kb(with_promo=False):
 
 
 def get_services_kb(salon_id=None, with_promo=True):
-    """Услуги для сценария 'Записаться в салон', фильтруются по салону."""
     if salon_id:
         query = """
             SELECT DISTINCT s.id, s.name, s.price
@@ -45,10 +46,11 @@ def get_services_kb(salon_id=None, with_promo=True):
         rows = fetch_all(query, (salon_id,))
     else:
         rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
-    
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+
     if with_promo:
         kb.row('У меня есть промокод')
     kb.row('Назад', 'Отмена')
@@ -56,9 +58,8 @@ def get_services_kb(salon_id=None, with_promo=True):
 
 
 def get_services_by_master_kb(master_id):
-    """Услуги, которые оказывает конкретный мастер."""
     query = """
-        SELECT s.id, s.name, s.price 
+        SELECT s.id, s.name, s.price
         FROM services s
         JOIN master_services ms ON s.id = ms.service_id
         WHERE ms.master_id = %s
@@ -66,6 +67,7 @@ def get_services_by_master_kb(master_id):
     """
     rows = fetch_all(query, (master_id,))
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
     kb.row('У меня есть промокод')
@@ -76,6 +78,7 @@ def get_services_by_master_kb(master_id):
 def get_all_masters_kb():
     rows = fetch_all("SELECT id, full_name FROM masters ORDER BY id")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for mid, name in rows:
         kb.add(KeyboardButton(f"{mid} {name}"))
     kb.row('Назад', 'Отмена')
@@ -84,7 +87,7 @@ def get_all_masters_kb():
 
 def get_masters_by_service_kb(service_id):
     query = """
-        SELECT m.id, m.full_name 
+        SELECT m.id, m.full_name
         FROM masters m
         JOIN master_services ms ON m.id = ms.master_id
         WHERE ms.service_id = %s
@@ -92,6 +95,7 @@ def get_masters_by_service_kb(service_id):
     """
     rows = fetch_all(query, (service_id,))
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for mid, name in rows:
         kb.add(KeyboardButton(f"{mid} {name}"))
     kb.row('Назад', 'Отмена')
@@ -100,7 +104,7 @@ def get_masters_by_service_kb(service_id):
 
 def get_masters_kb(service_id, salon_id):
     query = """
-        SELECT m.id, m.full_name 
+        SELECT m.id, m.full_name
         FROM masters m
         JOIN master_services ms ON m.id = ms.master_id
         WHERE ms.service_id = %s AND m.salon_id = %s
@@ -108,6 +112,7 @@ def get_masters_kb(service_id, salon_id):
     """
     rows = fetch_all(query, (service_id, salon_id))
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
     for mid, name in rows:
         kb.add(KeyboardButton(f"{mid} {name}"))
     kb.row('Назад', 'Отмена')
@@ -120,23 +125,24 @@ def get_time_slots_kb(master_id, date_str):
         (master_id, date_str)
     )
     occupied_times = [row[0] for row in occupied]
-    all_slots = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00']
-    
+    all_slots = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00']
     today = datetime.date.today()
+
     if date_str == today.strftime("%Y-%m-%d"):
         now = datetime.datetime.now()
         current_time_str = now.strftime("%H:%M")
         free_slots = [t for t in all_slots if t not in occupied_times and t > current_time_str]
     else:
         free_slots = [t for t in all_slots if t not in occupied_times]
-
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     row = []
+
     for slot in free_slots:
         row.append(KeyboardButton(slot))
         if len(row) == 3:
             kb.row(*row)
             row = []
+
     if row:
         kb.row(*row)
     kb.row('Назад', 'Отмена')
@@ -159,4 +165,16 @@ def get_back_cancel_kb():
 def agree_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add('Согласен')
+    return kb
+
+
+def get_payment_choice_kb():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row('💳 Оплатить онлайн', '⏰ Позже')
+    return kb
+
+
+def get_payment_form_kb():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row('💳 Оплатить', 'Отмена')
     return kb

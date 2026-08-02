@@ -77,3 +77,19 @@ def get_back_cancel_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row('Назад', 'Отмена')
     return kb
+
+
+def write_feedback(feedback):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row('Оставить отзыв')
+    return kb
+
+
+def get_all_masters():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    masters = fetch_all("SELECT full_name, id FROM masters")
+
+    for full_name, id in masters:
+        kb.add(KeyboardButton(full_name))
+
+    kb.row('Назад', 'Отмена')

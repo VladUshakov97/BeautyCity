@@ -19,16 +19,20 @@ def get_salons_kb():
     return kb
 
 
-def get_all_services_kb():
+def get_all_services_kb(with_promo=False):
+    """Все услуги для сценария 'Записаться на процедуру'. with_promo=True добавляет кнопку промокода."""
     rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    if with_promo:
+        kb.row('У меня есть промокод')
     kb.row('Назад', 'Отмена')
     return kb
 
 
-def get_services_kb(salon_id=None):
+def get_services_kb(salon_id=None, with_promo=True):
+    """Услуги для сценария 'Записаться в салон', фильтруются по салону."""
     if salon_id:
         query = """
             SELECT DISTINCT s.id, s.name, s.price
@@ -45,11 +49,14 @@ def get_services_kb(salon_id=None):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    if with_promo:
+        kb.row('У меня есть промокод')
     kb.row('Назад', 'Отмена')
     return kb
 
 
 def get_services_by_master_kb(master_id):
+    """Услуги, которые оказывает конкретный мастер."""
     query = """
         SELECT s.id, s.name, s.price 
         FROM services s
@@ -61,6 +68,7 @@ def get_services_by_master_kb(master_id):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
+    kb.row('У меня есть промокод')
     kb.row('Назад', 'Отмена')
     return kb
 

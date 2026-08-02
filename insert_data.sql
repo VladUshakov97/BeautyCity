@@ -32,11 +32,3 @@ VALUES
 (4,3),
 (5,5),
 (5,4);
-
-CREATE TABLE feedback
-(
-    id  SERIAL PRIMARY KEY,
-    user_id VARCHAR(20),
-    text VARCHAR(200)
-);
-

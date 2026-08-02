@@ -1,7 +1,7 @@
 import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot.custom_filters import StateFilter
-from telebot.types import Message
+from telebot.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 import os
 from dotenv import load_dotenv
 from states import BookingStates
@@ -13,18 +13,92 @@ import datetime
 load_dotenv()
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
-
 bot = telebot.TeleBot(TOKEN)
 user_data = {}
 
-# команда /start
+# КАЛЕНДАРЬ
+def create_calendar(year, month):
+    kb = InlineKeyboardMarkup(row_width=7)
+    kb.row(
+        InlineKeyboardButton("◀", callback_data=f"prev_{year}_{month}"),
+        InlineKeyboardButton(f"{month:02d}.{year}", callback_data="ignore"),
+        InlineKeyboardButton("▶", callback_data=f"next_{year}_{month}")
+    )
+    kb.row(*[InlineKeyboardButton(d, callback_data="ignore") for d in ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]])
+    first_day = datetime.date(year, month, 1)
+    start_weekday = first_day.weekday()
+    if month == 12:
+        next_month = datetime.date(year+1, 1, 1)
+    else:
+        next_month = datetime.date(year, month+1, 1)
+    num_days = (next_month - datetime.timedelta(days=1)).day
+    row = []
+    for _ in range(start_weekday):
+        row.append(InlineKeyboardButton(" ", callback_data="ignore"))
+    for day in range(1, num_days+1):
+        row.append(InlineKeyboardButton(str(day), callback_data=f"date_{year}-{month:02d}-{day:02d}"))
+        if len(row) == 7:
+            kb.row(*row)
+            row = []
+    if row:
+        kb.row(*row)
+    return kb
+
+def show_calendar(chat_id):
+    now = datetime.datetime.now()
+    bot.send_message(chat_id, "📅 Выберите дату:", reply_markup=create_calendar(now.year, now.month))
+
+# ОБРАБОТЧИК КАЛЕНДАР
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("date_", "prev_", "next_")))
+def calendar_callback(call):
+    chat_id = call.message.chat.id
+    data = call.data
+    if data.startswith("date_"):
+        date_str = data.split("_")[1]
+        selected_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+        today = datetime.date.today()
+        if selected_date < today or selected_date > today + datetime.timedelta(days=7):
+            bot.answer_callback_query(call.id, "Можно записаться только на даты от сегодня до +7 дней.")
+            return
+        user_data[chat_id]['date'] = date_str
+        user_data[chat_id]['date_chosen'] = True
+        bot.edit_message_reply_markup(chat_id, call.message.message_id)
+        master_id = user_data[chat_id]['master_id']
+        slots_kb, free_slots = get_time_slots_kb(master_id, date_str)
+        if not free_slots:
+            bot.send_message(chat_id, "На эту дату нет свободного времени. Попробуйте другую.")
+            del user_data[chat_id]['date_chosen']
+            show_calendar(chat_id)
+            return
+        bot.send_message(chat_id, "Выберите свободное время:", reply_markup=slots_kb)
+        bot.answer_callback_query(call.id)
+    elif data.startswith("prev_"):
+        _, year, month = data.split("_")
+        year, month = int(year), int(month)
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_calendar(year, month))
+        bot.answer_callback_query(call.id)
+    elif data.startswith("next_"):
+        _, year, month = data.split("_")
+        year, month = int(year), int(month)
+        month += 1
+        if month == 13:
+            month = 1
+            year += 1
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_calendar(year, month))
+        bot.answer_callback_query(call.id)
+
+# КОМАНДА /start
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     bot.send_message(chat_id, "Добро пожаловать в BeautyCity! Выберите действие:", reply_markup=main_menu())
     bot.set_state(chat_id, None, chat_id)
 
-# главное меню
+# ГЛАВНОЕ МЕНЮ
 @bot.message_handler(state=None, func=lambda m: m.text in ['Записаться в салон', 'Записаться к мастеру', 'Записаться на процедуру', 'Записаться по телефону'])
 def handle_main_menu(message):
     chat_id = message.chat.id
@@ -56,7 +130,7 @@ def handle_main_menu(message):
             bot.send_message(chat_id, "Телефон временно недоступен.")
         bot.set_state(chat_id, None, chat_id)
 
-# выбор салона
+# ВЫБОР САЛОНА
 @bot.message_handler(state=BookingStates.choose_salon)
 def process_salon(message):
     chat_id = message.chat.id
@@ -82,9 +156,13 @@ def process_salon(message):
 
     user_data[chat_id]['salon_id'] = salon_id
     bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-    bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
+    services_kb = get_services_kb(salon_id)
+    if not services_kb.keyboard:
+        bot.send_message(chat_id, "В этом салоне пока нет доступных услуг. Выберите другой салон.", reply_markup=get_salons_kb())
+        return
+    bot.send_message(chat_id, "Выберите услугу:", reply_markup=services_kb)
 
-# выбор услуги
+# ВЫБОР УСЛУГИ
 @bot.message_handler(state=BookingStates.choose_service)
 def process_service(message):
     chat_id = message.chat.id
@@ -104,7 +182,7 @@ def process_service(message):
         elif scenario == 'service_first':
             bot.set_state(chat_id, None, chat_id)
             bot.send_message(chat_id, "Выберите действие:", reply_markup=main_menu())
-        else:
+        else:  # master_first
             bot.set_state(chat_id, BookingStates.choose_master, chat_id)
             bot.send_message(chat_id, "Выберите мастера:", reply_markup=get_all_masters_kb())
         return
@@ -130,10 +208,9 @@ def process_service(message):
         return
     elif scenario == 'master_first':
         bot.set_state(chat_id, BookingStates.choose_time, chat_id)
-        bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД (например, 2026-08-01):")
-        bot.send_message(chat_id, "Пока доступны только даты с сегодня по +7 дней.")
+        show_calendar(chat_id)
         return
-    else: 
+    else:  # salon_first
         salon_id = user_data[chat_id]['salon_id']
         masters_kb = get_masters_kb(service_id, salon_id)
         if masters_kb.keyboard:
@@ -142,9 +219,10 @@ def process_service(message):
         else:
             bot.send_message(chat_id, "К сожалению, в этом салоне нет мастеров для данной услуги. Попробуйте выбрать другой салон или услугу.")
             bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-            bot.send_message(chat_id, "Выберите другую услугу:", reply_markup=get_services_kb())
+            services_kb = get_services_kb(salon_id)
+            bot.send_message(chat_id, "Выберите другую услугу:", reply_markup=services_kb)
 
-# выбор мастера
+# ВЫБОР МАСТЕРА
 @bot.message_handler(state=BookingStates.choose_master)
 def process_master(message):
     chat_id = message.chat.id
@@ -166,7 +244,9 @@ def process_master(message):
             bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_all_services_kb())
         else:  # salon_first
             bot.set_state(chat_id, BookingStates.choose_service, chat_id)
-            bot.send_message(chat_id, "Выберите услугу:", reply_markup=get_services_kb())
+            salon_id = user_data[chat_id]['salon_id']
+            services_kb = get_services_kb(salon_id)
+            bot.send_message(chat_id, "Выберите услугу:", reply_markup=services_kb)
         return
 
     try:
@@ -201,17 +281,16 @@ def process_master(message):
         bot.send_message(chat_id, "Этот мастер не оказывает выбранную услугу. Выберите другого.")
         if scenario == 'service_first':
             bot.send_message(chat_id, "Выберите другого мастера:", reply_markup=get_masters_by_service_kb(service_id))
-        else:
+        else:  # salon_first
             bot.send_message(chat_id, "Выберите другого мастера:", reply_markup=get_masters_kb(service_id, salon_id))
         return
 
     bot.set_state(chat_id, BookingStates.choose_time, chat_id)
-    bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД (например, 2026-08-01):")
-    bot.send_message(chat_id, "Пока доступны только даты с сегодня по +7 дней.")
+    show_calendar(chat_id)
 
-# выбор даты и времени
+# FALLBACK ДЛЯ ВЫБОРА ВРЕМЕНИ
 @bot.message_handler(state=BookingStates.choose_time)
-def process_time(message):
+def process_time_fallback(message):
     chat_id = message.chat.id
     text = message.text
 
@@ -240,27 +319,7 @@ def process_time(message):
         return
 
     if not user_data.get(chat_id, {}).get('date_chosen'):
-        try:
-            date_obj = datetime.datetime.strptime(text, "%Y-%m-%d").date()
-            today = datetime.date.today()
-            if date_obj < today or date_obj > today + datetime.timedelta(days=7):
-                bot.send_message(chat_id, "Дата должна быть от сегодня до +7 дней. Введите другую дату.")
-                return
-        except ValueError:
-            bot.send_message(chat_id, "Неверный формат. Введите дату в формате ГГГГ-ММ-ДД.")
-            return
-
-        user_data[chat_id]['date'] = text
-        user_data[chat_id]['date_chosen'] = True
-
-        master_id = user_data[chat_id]['master_id']
-        slots_kb = get_time_slots_kb(master_id, text)
-        if not slots_kb.keyboard or len(slots_kb.keyboard) == 0:
-            bot.send_message(chat_id, "На эту дату нет свободного времени. Попробуйте другую дату.")
-            del user_data[chat_id]['date_chosen']
-            return
-
-        bot.send_message(chat_id, "Выберите свободное время:", reply_markup=slots_kb)
+        show_calendar(chat_id)
         return
 
     if not re.match(r'^\d{2}:\d{2}$', text):
@@ -275,7 +334,12 @@ def process_time(message):
     )
     if occupied:
         bot.send_message(chat_id, "Это время уже занято. Выберите другое.")
-        slots_kb = get_time_slots_kb(master_id, date_str)
+        slots_kb, free_slots = get_time_slots_kb(master_id, date_str)
+        if not free_slots:
+            bot.send_message(chat_id, "На эту дату больше нет свободного времени. Попробуйте другую дату.")
+            del user_data[chat_id]['date_chosen']
+            show_calendar(chat_id)
+            return
         bot.send_message(chat_id, "Свободные слоты:", reply_markup=slots_kb)
         return
 
@@ -283,7 +347,7 @@ def process_time(message):
     bot.set_state(chat_id, BookingStates.enter_phone, chat_id)
     bot.send_message(chat_id, "Укажите ваш номер телефона для подтверждения записи (в формате +7XXXXXXXXXX):")
 
-# ввод телефона
+# ВВОД ТЕЛЕФОНА
 @bot.message_handler(state=BookingStates.enter_phone)
 def process_phone(message):
     chat_id = message.chat.id
@@ -297,7 +361,7 @@ def process_phone(message):
 
     if text == 'Назад':
         bot.set_state(chat_id, BookingStates.choose_time, chat_id)
-        bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД:")
+        show_calendar(chat_id)
         return
 
     if not re.match(r'^\+7\d{10}$', text):
@@ -364,7 +428,7 @@ def process_phone(message):
     )
     bot.send_message(chat_id, summary, reply_markup=get_confirm_kb())
 
-# подтверждение записи
+# ПОДТВЕРЖДЕНИЕ ЗАПИСИ
 @bot.message_handler(state=BookingStates.confirm)
 def process_confirm(message):
     chat_id = message.chat.id

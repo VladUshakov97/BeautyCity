@@ -1,5 +1,6 @@
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from database import fetch_all
+import datetime
 
 
 def main_menu():
@@ -28,7 +29,19 @@ def get_all_services_kb():
 
 
 def get_services_kb(salon_id=None):
-    rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
+    if salon_id:
+        query = """
+            SELECT DISTINCT s.id, s.name, s.price
+            FROM services s
+            JOIN master_services ms ON ms.service_id = s.id
+            JOIN masters m ON m.id = ms.master_id
+            WHERE m.salon_id = %s
+            ORDER BY s.id
+        """
+        rows = fetch_all(query, (salon_id,))
+    else:
+        rows = fetch_all("SELECT id, name, price FROM services ORDER BY id")
+    
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for sid, name, price in rows:
         kb.add(KeyboardButton(f"{sid} {name} — {price}₽"))
@@ -99,9 +112,15 @@ def get_time_slots_kb(master_id, date_str):
         (master_id, date_str)
     )
     occupied_times = [row[0] for row in occupied]
-
     all_slots = ['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00']
-    free_slots = [t for t in all_slots if t not in occupied_times]
+    
+    today = datetime.date.today()
+    if date_str == today.strftime("%Y-%m-%d"):
+        now = datetime.datetime.now()
+        current_time_str = now.strftime("%H:%M")
+        free_slots = [t for t in all_slots if t not in occupied_times and t > current_time_str]
+    else:
+        free_slots = [t for t in all_slots if t not in occupied_times]
 
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     row = []
@@ -113,7 +132,7 @@ def get_time_slots_kb(master_id, date_str):
     if row:
         kb.row(*row)
     kb.row('Назад', 'Отмена')
-    return kb
+    return kb, free_slots
 
 
 def get_confirm_kb():

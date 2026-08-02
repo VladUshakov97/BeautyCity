@@ -48,7 +48,7 @@ def show_calendar(chat_id):
     now = datetime.datetime.now()
     bot.send_message(chat_id, "📅 Выберите дату:", reply_markup=create_calendar(now.year, now.month))
 
-# ОБРАБОТЧИК КАЛЕНДАР
+# ОБРАБОТЧИК КАЛЕНДАРЯ
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("date_", "prev_", "next_")))
 def calendar_callback(call):
     chat_id = call.message.chat.id
@@ -91,13 +91,59 @@ def calendar_callback(call):
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=create_calendar(year, month))
         bot.answer_callback_query(call.id)
 
-# КОМАНДА /start
+# КОМАНДА /start (с проверкой согласия и файла)
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "Добро пожаловать в BeautyCity! Выберите действие:", reply_markup=main_menu())
-    bot.set_state(chat_id, None, chat_id)
+    client = fetch_one("SELECT agreed FROM clients WHERE id = %s", (chat_id,))
+    if client and client[0] == True:
+        bot.send_message(chat_id, "Добро пожаловать в BeautyCity! Выберите действие:", reply_markup=main_menu())
+        bot.set_state(chat_id, None, chat_id)
+    else:
+        file_path = 'agreement.docx'
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            file_path = 'agreement.txt'
+            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                bot.send_message(chat_id, "Файл с согласием не найден или пуст. Пожалуйста, свяжитесь с администратором.")
+                return
+        try:
+            with open(file_path, 'rb') as f:
+                bot.send_document(chat_id, f)
+        except Exception as e:
+            bot.send_message(chat_id, f"Ошибка при отправке файла: {e}")
+            return
 
+        bot.send_message(
+            chat_id,
+            "Для использования бота необходимо дать согласие на обработку персональных данных.\n"
+            "Ознакомьтесь с документом и нажмите 'Согласен'.",
+            reply_markup=agree_kb()
+        )
+        bot.set_state(chat_id, BookingStates.accept_personal_data, chat_id)
+
+# ОБРАБОТЧИК СОГЛАСИЯ
+@bot.message_handler(state=BookingStates.accept_personal_data)
+def accept_personal_data(message):
+    chat_id = message.chat.id
+    if message.text == 'Согласен':
+        client = fetch_one("SELECT id FROM clients WHERE id = %s", (chat_id,))
+        if client:
+            execute_query("UPDATE clients SET agreed = TRUE WHERE id = %s", (chat_id,))
+        else:
+            execute_query(
+                "INSERT INTO clients (id, agreed) VALUES (%s, TRUE)",
+                (chat_id,)
+            )
+        bot.send_message(chat_id, "Спасибо! Теперь вы можете пользоваться ботом.", reply_markup=main_menu())
+        bot.set_state(chat_id, None, chat_id)
+    else:
+        bot.send_message(
+            chat_id,
+            "Для использования бота необходимо дать согласие на обработку данных.",
+            reply_markup=agree_kb()
+        )
+
+# ОСТАЛЬНЫЕ ОБРАБОТЧИКИ
 # ГЛАВНОЕ МЕНЮ
 @bot.message_handler(state=None, func=lambda m: m.text in ['Записаться в салон', 'Записаться к мастеру', 'Записаться на процедуру', 'Записаться по телефону'])
 def handle_main_menu(message):
@@ -399,7 +445,7 @@ def process_phone(message):
         execute_query("UPDATE clients SET phone = %s WHERE id = %s", (text, chat_id))
     else:
         execute_query(
-            "INSERT INTO clients (id, phone) VALUES (%s, %s)",
+            "INSERT INTO clients (id, phone, agreed) VALUES (%s, %s, FALSE)",
             (chat_id, text)
         )
         client_id = chat_id

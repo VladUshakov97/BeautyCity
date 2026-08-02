@@ -146,3 +146,9 @@ def get_back_cancel_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row('Назад', 'Отмена')
     return kb
+
+
+def agree_kb():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add('Согласен')
+    return kb

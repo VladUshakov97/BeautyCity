@@ -238,6 +238,7 @@ def process_phone(message):
         bot.set_state(chat_id, None, chat_id)
         del user_data[chat_id]
         return
+
     if text == 'Назад':
         bot.set_state(chat_id, BookingStates.choose_time, chat_id)
         bot.send_message(chat_id, "Введите дату в формате ГГГГ-ММ-ДД:")
@@ -248,9 +249,10 @@ def process_phone(message):
         return
 
     user_data[chat_id]['phone'] = text
-    client = fetch_one("SELECT id FROM clients WHERE phone = %s", (text,))
+    client = fetch_one("SELECT id FROM clients WHERE id = %s", (chat_id,))
     if client:
         client_id = client[0]
+        execute_query("UPDATE clients SET phone = %s WHERE id = %s", (text, chat_id))
     else:
         execute_query(
             "INSERT INTO clients (id, phone) VALUES (%s, %s)",
@@ -260,6 +262,7 @@ def process_phone(message):
 
     user_data[chat_id]['client_id'] = client_id
     bot.set_state(chat_id, BookingStates.confirm, chat_id)
+
     summary = (
         f"Проверьте данные:\n"
         f"Салон: {fetch_one('SELECT address FROM salons WHERE id=%s', (user_data[chat_id]['salon_id'],))[0]}\n"
@@ -280,10 +283,15 @@ def process_confirm(message):
     if text == 'Отмена':
         bot.send_message(chat_id, "Запись отменена.", reply_markup=main_menu())
         bot.set_state(chat_id, None, chat_id)
-        del user_data[chat_id]
+        if chat_id in user_data:
+            del user_data[chat_id]
         return
 
     if text == 'Изменить данные':
+        if chat_id in user_data:
+            del user_data[chat_id]
+        user_data[chat_id] = {}
+
         bot.send_message(chat_id, "Начните заново выбор салона.")
         bot.set_state(chat_id, BookingStates.choose_salon, chat_id)
         bot.send_message(chat_id, "Выберите салон:", reply_markup=get_salons_kb())
